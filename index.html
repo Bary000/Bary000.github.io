@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Teacher Wordle — власне слово</title>
+  <style>
+    :root{
+      --bg:#0e0f12; --card:#16181d; --text:#e7e9ea; --muted:#aab0b6;
+      --key:#2a2e35; --key-hi:#3a3f47; --ok:#539165; --pos:#b59f3b; --miss:#3a3f47; --accent:#7aa2f7;
+      --radius:16px
+    }
+    *{box-sizing:border-box}
+    body{margin:0; font-family:system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, "Helvetica Neue", Arial, "Apple Color Emoji", "Segoe UI Emoji"; background:var(--bg); color:var(--text); display:flex; min-height:100vh;}
+    .wrap{max-width:860px; margin:0 auto; padding:24px; width:100%;}
+    h1{margin:0 0 12px; font-size:22px}
+    .bar{display:flex; gap:12px; align-items:center; flex-wrap:wrap; background:var(--card); padding:12px; border-radius:var(--radius);}
+    .bar input[type=password]{flex:1; padding:10px 12px; border-radius:10px; border:1px solid #2b2f37; background:#0f1115; color:var(--text); min-width:180px}
+    .bar button, .bar select, .bar input[type=checkbox]{cursor:pointer}
+    .btn{border:0; padding:10px 14px; border-radius:10px; background:var(--accent); color:#081121; font-weight:700}
+    .muted{color:var(--muted); font-size:14px}
+
+    .board{margin:16px auto; display:grid; gap:8px; justify-content:center}
+    .row{display:grid; gap:8px}
+    .cell{width:56px; height:56px; border:2px solid #2b2f37; display:grid; place-items:center; font-weight:800; font-size:22px; text-transform:uppercase; border-radius:10px; background:#0f1115}
+    .cell.filled{border-color:#4a4f58}
+    .cell.ok{background:var(--ok); border-color:var(--ok)}
+    .cell.pos{background:var(--pos); border-color:var(--pos)}
+    .cell.miss{background:var(--miss); border-color:var(--miss)}
+
+    .kb{max-width:700px; margin:18px auto 0; display:grid; gap:8px}
+    .kb-row{display:flex; gap:8px; justify-content:center}
+    .key{background:var(--key); border:0; padding:12px 10px; min-width:40px; border-radius:10px; color:var(--text); font-weight:700; text-transform:uppercase}
+    .key.small{font-size:12px}
+    .key.ok{background:var(--ok)}
+    .key.pos{background:var(--pos)}
+    .key.miss{background:var(--miss)}
+
+    .toast{position:fixed; top:16px; left:50%; transform:translateX(-50%); background:#22262e; color:var(--text); padding:10px 14px; border-radius:10px; box-shadow:0 8px 24px rgba(0,0,0,.45); opacity:0; pointer-events:none; transition:.25s}
+    .toast.show{opacity:1}
+    .footer{margin-top:16px; color:var(--muted); font-size:14px}
+    a{color:#9ec1ff}
+    @media (max-width:480px){ .cell{width:46px; height:46px} }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Wordle для вчителя — своє слово</h1>
+    <div class="bar">
+      <label class="muted">Секретне слово (англ., саме 8 літер):</label>
+      <input id="secret" type="password" placeholder="Напр., NOTEBOOK" autocomplete="off" maxlength="8" minlength="8" />
+      <button class="btn" id="startBtn">Старт</button>
+      <button id="revealBtn">Показати/сховати</button>
+      <span class="muted">Можна також задати через URL: <code>?word=XXXXXXXX</code></span>
+    </div>
+
+    <div id="board" class="board"></div>
+
+    <div class="kb" id="kb"></div>
+
+    <div class="footer">
+      
+      Порада: перед уроком введіть слово та натисніть <b>Старт</b>. Учні відгадують за 6 спроб. Кольори: зелений — літера й позиція вірні; жовтий — літера є, але в іншому місці; сірий — літери немає.
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+    const kbRows = [
+      [..."qwertyuiop"],
+      [..."asdfghjkl"],
+      ["Enter", ..."zxcvbnm", "Back"]
+    ];
+
+    const qs = (s)=>document.querySelector(s);
+    const boardEl = qs('#board');
+    const kbEl = qs('#kb');
+    const toast = qs('#toast');
+    const secretInput = qs('#secret');
+    const startBtn = qs('#startBtn');
+    const revealBtn = qs('#revealBtn');
+
+    let secret = "";
+    let WORDLEN = 8;
+    let MAX_TRIES = 6;
+    let curRow = 0, curCol = 0;
+    let grid = []; // letters
+    let locked = false; // after win/lose
+
+    function showToast(msg, ms=1500){
+      toast.textContent = msg; toast.classList.add('show');
+      setTimeout(()=>toast.classList.remove('show'), ms);
+    }
+
+    function buildBoard(){
+      boardEl.innerHTML = "";
+      boardEl.style.gridTemplateColumns = repeat(${WORDLEN}, 1fr); // for mobile width center
+      for(let r=0;r<MAX_TRIES;r++){
+        const row = document.createElement('div');
+        row.className = 'row';
+        row.style.gridTemplateColumns = repeat(${WORDLEN}, 56px);
+        for(let c=0;c<WORDLEN;c++){
+          const cell = document.createElement('div');
+          cell.className = 'cell';
+          row.appendChild(cell);
+        }
+        boardEl.appendChild(row);
+      }
+    }
+
+    function buildKB(){
+      kbEl.innerHTML = '';
+      kbRows.forEach(row=>{
+        const r = document.createElement('div');
+        r.className = 'kb-row';
+        row.forEach(k=>{
+          const b = document.createElement('button');
+          b.className = 'key'+(k.length>1?' small':'');
+          b.textContent = k;
+          b.dataset.key = k;
+          b.addEventListener('click', ()=>handleKey(k));
+          r.appendChild(b);
+        })
+        kbEl.appendChild(r);
+      })
+    }
+
+    function resetGame(word){
+      secret = word.toUpperCase();
+      WORDLEN = secret.length;
+      curRow = 0; curCol = 0; locked = false;
+      grid = Array.from({length:MAX_TRIES}, ()=>Array(WORDLEN).fill(''));
+      buildBoard();
+      paintGrid();
+      updateURL(word);
+    }
+
+    function updateURL(word){
+      const url = new URL(location.href);
+      url.searchParams.set('word', word.toUpperCase());
+      history.replaceState({}, '', url);
+    }
+
+    function handleKey(k){
+      if(locked) return;
+      if(k === 'Enter'){ return submitRow(); }
+      if(k === 'Back'){ if(curCol>0){ curCol--; grid[curRow][curCol]=''; paintGrid(); } return; }
+      if(/^[a-z]$/i.test(k)){
+        if(curCol < WORDLEN){ grid[curRow][curCol] = k.toUpperCase(); curCol++; paintGrid(); }
+      }
+    }
+
+    function paintGrid(){
+      const rows = [...boardEl.children];
+      rows.forEach((rowEl, r)=>{
+        [...rowEl.children].forEach((cell, c)=>{
+          const ch = grid[r][c];
+          cell.textContent = ch;
+          cell.classList.toggle('filled', !!ch);
+          cell.classList.remove('ok','pos','miss');
+          if(r < curRow){ // already evaluated
+            const evalRow = evaluateRow(grid[r].join(''));
+            const status = evalRow[c];
+            cell.classList.add(status);
+          }
+        })
+      })
+      // keyboard coloring based on best status
+      const best = {}; // letter -> status order: miss < pos < ok
+      for(let r=0;r<curRow;r++){
+        const guess = grid[r].join('');
+        const evalRow = evaluateRow(guess);
+        for(let i=0;i<WORDLEN;i++){
+          const ch = guess[i];
+          const st = evalRow[i];
+          const rank = {miss:0,pos:1,ok:2};
+          if(!best[ch] || rank[st] > rank[best[ch]]) best[ch]=st;
+        }
+      }
+      [...kbEl.querySelectorAll('.key')].forEach(k=>{
+        const val = (k.dataset.key||'').toUpperCase();
+        k.classList.remove('ok','pos','miss');
+        if(best[val]) k.classList.add(best[val]);
+      })
+    }
+
+    function evaluateRow(guess){
+      guess = guess.toUpperCase();
+      const res = Array(WORDLEN).fill('miss');
+      const secretArr = secret.split('');
+      const used = Array(WORDLEN).fill(false);
+      // pass 1: greens
+      for(let i=0;i<WORDLEN;i++){
+        if(guess[i] === secret[i]){ res[i] = 'ok'; used[i] = true; }
+      }
+      // pass 2: yellows
+      for(let i=0;i<WORDLEN;i++){
+        if(res[i] === 'ok') continue;
+        const idx = secretArr.findIndex((ch, j)=>!used[j] && ch === guess[i]);
+        if(idx !== -1){ res[i] = 'pos'; used[idx] = true; }
+      }
+      return res;
+    }
+
+    function submitRow(){
+      if(grid[curRow].some(ch=>!ch)){
+        showToast('Заповніть усі літери');
+        return;
+      }
+      const guess = grid[curRow].join('');
+      const evalRow = evaluateRow(guess);
+      // lock paint for this row
+      const rowEl = boardEl.children[curRow];
+      [...rowEl.children].forEach((cell, i)=>{
+        cell.classList.add(evalRow[i]);
+      });
+
+      if(guess.toUpperCase() === secret){
+        locked = true; showToast('Вітаю! Слово вгадано 🎉');
+      } else if(curRow === MAX_TRIES-1){
+        locked = true; showToast(`На жаль. Секрет: ${secret}` , 2500);
+      } else {
+        curRow++; curCol = 0;
+      }
+      paintGrid();
+    }
+
+    // keyboard + physical keys
+    buildKB();
+    window.addEventListener('keydown', (e)=>{
+      const k = e.key;
+      if(k === 'Enter') return handleKey('Enter');
+      if(k === 'Backspace') return handleKey('Back');
+      if(/^[a-z]$/i.test(k)) handleKey(k);
+    })
+
+    startBtn.addEventListener('click', ()=>{
+      const w = (secretInput.value||'').trim();
+      if(!/^[a-zA-Z]{8}$/.test(w)){
+        showToast('Введіть слово англійською, рівно 8 літер');
+        return;
+      }
+      resetGame(w);
+      secretInput.value = '';
+    });
+
+    revealBtn.addEventListener('click', ()=>{
+      secretInput.type = secretInput.type === 'password' ? 'text' : 'password';
+    })
+
+    // Autostart from URL param ?word=XXXXXXXX
+    const urlWord = new URL(location.href).searchParams.get('word');
+    if(urlWord && /^[a-zA-Z]{8}$/.test(urlWord)){
+      resetGame(urlWord);
+    } else {
+      // default board (8-letter) until teacher presses Start
+      WORDLEN = 8; buildBoard();
+    }
+  </script>
+</body>
+</html>
