@@ -59,204 +59,228 @@
     <div class="kb" id="kb"></div>
 
     <div class="footer">
-      
       Порада: перед уроком введіть слово та натисніть <b>Старт</b>. Учні відгадують за 6 спроб. Кольори: зелений — літера й позиція вірні; жовтий — літера є, але в іншому місці; сірий — літери немає.
     </div>
   </div>
 
   <div class="toast" id="toast"></div>
-
   <script>
-    const kbRows = [
-      [..."qwertyuiop"],
-      [..."asdfghjkl"],
-      ["Enter", ..."zxcvbnm", "Back"]
-    ];
+const kbRows = [
+  [..."qwertyuiop"],
+  [..."asdfghjkl"],
+  ["Enter", ..."zxcvbnm", "Back"]
+];
 
-    const qs = (s)=>document.querySelector(s);
-    const boardEl = qs('#board');
-    const kbEl = qs('#kb');
-    const toast = qs('#toast');
-    const secretInput = qs('#secret');
-    const startBtn = qs('#startBtn');
-    const revealBtn = qs('#revealBtn');
+const qs = s => document.querySelector(s);
+const boardEl = qs('#board'),
+      kbEl = qs('#kb'),
+      toast = qs('#toast'),
+      secretInput = qs('#secret'),
+      startBtn = qs('#startBtn'),
+      revealBtn = qs('#revealBtn');
 
-    let secret = "";
-    let WORDLEN = 8;
-    let MAX_TRIES = 6;
-    let curRow = 0, curCol = 0;
-    let grid = []; // letters
-    let locked = false; // after win/lose
+let secret = "";
+let WORDLEN = 8;
+let MAX_TRIES = 6;
+let curRow = 0, curCol = 0;
+let grid = [];
+let locked = false;
 
-    function showToast(msg, ms=1500){
-      toast.textContent = msg; toast.classList.add('show');
-      setTimeout(()=>toast.classList.remove('show'), ms);
+function showToast(msg, ms=1500) {
+  toast.textContent = msg;
+  toast.classList.add('show');
+  setTimeout(() => toast.classList.remove('show'), ms);
+}
+
+function buildBoard() {
+  boardEl.innerHTML = "";
+  boardEl.style.gridTemplateColumns = repeat(${WORDLEN}, 1fr);
+  for (let r = 0; r < MAX_TRIES; r++) {
+    const row = document.createElement('div');
+    row.className = 'row';
+    row.style.gridTemplateColumns = repeat(${WORDLEN}, 56px);
+    for (let c = 0; c < WORDLEN; c++) {
+      const cell = document.createElement('div');
+      cell.className = 'cell';
+      row.appendChild(cell);
     }
+    boardEl.appendChild(row);
+  }
+}
 
-    function buildBoard(){
-      boardEl.innerHTML = "";
-      boardEl.style.gridTemplateColumns = repeat(${WORDLEN}, 1fr); // for mobile width center
-      for(let r=0;r<MAX_TRIES;r++){
-        const row = document.createElement('div');
-        row.className = 'row';
-        row.style.gridTemplateColumns = repeat(${WORDLEN}, 56px);
-        for(let c=0;c<WORDLEN;c++){
-          const cell = document.createElement('div');
-          cell.className = 'cell';
-          row.appendChild(cell);
-        }
-        boardEl.appendChild(row);
-      }
-    }
-
-    function buildKB(){
-      kbEl.innerHTML = '';
-      kbRows.forEach(row=>{
-        const r = document.createElement('div');
-        r.className = 'kb-row';
-        row.forEach(k=>{
-          const b = document.createElement('button');
-          b.className = 'key'+(k.length>1?' small':'');
-          b.textContent = k;
-          b.dataset.key = k;
-          b.addEventListener('click', ()=>handleKey(k));
-          r.appendChild(b);
-        })
-        kbEl.appendChild(r);
-      })
-    }
-
-    function resetGame(word){
-      secret = word.toUpperCase();
-      WORDLEN = secret.length;
-      curRow = 0; curCol = 0; locked = false;
-      grid = Array.from({length:MAX_TRIES}, ()=>Array(WORDLEN).fill(''));
-      buildBoard();
-      paintGrid();
-      updateURL(word);
-    }
-
-    function updateURL(word){
-      const url = new URL(location.href);
-      url.searchParams.set('word', word.toUpperCase());
-      history.replaceState({}, '', url);
-    }
-
-    function handleKey(k){
-      if(locked) return;
-      if(k === 'Enter'){ return submitRow(); }
-      if(k === 'Back'){ if(curCol>0){ curCol--; grid[curRow][curCol]=''; paintGrid(); } return; }
-      if(/^[a-z]$/i.test(k)){
-        if(curCol < WORDLEN){ grid[curRow][curCol] = k.toUpperCase(); curCol++; paintGrid(); }
-      }
-    }
-
-    function paintGrid(){
-      const rows = [...boardEl.children];
-      rows.forEach((rowEl, r)=>{
-        [...rowEl.children].forEach((cell, c)=>{
-          const ch = grid[r][c];
-          cell.textContent = ch;
-          cell.classList.toggle('filled', !!ch);
-          cell.classList.remove('ok','pos','miss');
-          if(r < curRow){ // already evaluated
-            const evalRow = evaluateRow(grid[r].join(''));
-            const status = evalRow[c];
-            cell.classList.add(status);
-          }
-        })
-      })
-      // keyboard coloring based on best status
-      const best = {}; // letter -> status order: miss < pos < ok
-      for(let r=0;r<curRow;r++){
-        const guess = grid[r].join('');
-        const evalRow = evaluateRow(guess);
-        for(let i=0;i<WORDLEN;i++){
-          const ch = guess[i];
-          const st = evalRow[i];
-          const rank = {miss:0,pos:1,ok:2};
-          if(!best[ch] || rank[st] > rank[best[ch]]) best[ch]=st;
-        }
-      }
-      [...kbEl.querySelectorAll('.key')].forEach(k=>{
-        const val = (k.dataset.key||'').toUpperCase();
-        k.classList.remove('ok','pos','miss');
-        if(best[val]) k.classList.add(best[val]);
-      })
-    }
-
-    function evaluateRow(guess){
-      guess = guess.toUpperCase();
-      const res = Array(WORDLEN).fill('miss');
-      const secretArr = secret.split('');
-      const used = Array(WORDLEN).fill(false);
-      // pass 1: greens
-      for(let i=0;i<WORDLEN;i++){
-        if(guess[i] === secret[i]){ res[i] = 'ok'; used[i] = true; }
-      }
-      // pass 2: yellows
-      for(let i=0;i<WORDLEN;i++){
-        if(res[i] === 'ok') continue;
-        const idx = secretArr.findIndex((ch, j)=>!used[j] && ch === guess[i]);
-        if(idx !== -1){ res[i] = 'pos'; used[idx] = true; }
-      }
-      return res;
-    }
-
-    function submitRow(){
-      if(grid[curRow].some(ch=>!ch)){
-        showToast('Заповніть усі літери');
-        return;
-      }
-      const guess = grid[curRow].join('');
-      const evalRow = evaluateRow(guess);
-      // lock paint for this row
-      const rowEl = boardEl.children[curRow];
-      [...rowEl.children].forEach((cell, i)=>{
-        cell.classList.add(evalRow[i]);
-      });
-
-      if(guess.toUpperCase() === secret){
-        locked = true; showToast('Вітаю! Слово вгадано 🎉');
-      } else if(curRow === MAX_TRIES-1){
-        locked = true; showToast(`На жаль. Секрет: ${secret}` , 2500);
-      } else {
-        curRow++; curCol = 0;
-      }
-      paintGrid();
-    }
-
-    // keyboard + physical keys
-    buildKB();
-    window.addEventListener('keydown', (e)=>{
-      const k = e.key;
-      if(k === 'Enter') return handleKey('Enter');
-      if(k === 'Backspace') return handleKey('Back');
-      if(/^[a-z]$/i.test(k)) handleKey(k);
-    })
-
-    startBtn.addEventListener('click', ()=>{
-      const w = (secretInput.value||'').trim();
-      if(!/^[a-zA-Z]{8}$/.test(w)){
-        showToast('Введіть слово англійською, рівно 8 літер');
-        return;
-      }
-      resetGame(w);
-      secretInput.value = '';
+function buildKB() {
+  kbEl.innerHTML = '';
+  kbRows.forEach(row => {
+    const r = document.createElement('div');
+    r.className = 'kb-row';
+    row.forEach(k => {
+      const b = document.createElement('button');
+      b.className = 'key' + (k.length > 1 ? ' small' : '');
+      b.textContent = k;
+      b.dataset.key = k;
+      b.addEventListener('click', () => handleKey(k));
+      r.appendChild(b);
     });
+    kbEl.appendChild(r);
+  });
+}
 
-    revealBtn.addEventListener('click', ()=>{
-      secretInput.type = secretInput.type === 'password' ? 'text' : 'password';
-    })
+function resetGame(word) {
+  secret = word.toUpperCase();
+  WORDLEN = secret.length;
+  curRow = 0;
+  curCol = 0;
+  locked = false;
+  grid = Array.from({length: MAX_TRIES}, () => Array(WORDLEN).fill(''));
+  buildBoard();
+  paintGrid();
+  updateURL(word);
+}
 
-    // Autostart from URL param ?word=XXXXXXXX
-    const urlWord = new URL(location.href).searchParams.get('word');
-    if(urlWord && /^[a-zA-Z]{8}$/.test(urlWord)){
-      resetGame(urlWord);
-    } else {
-      // default board (8-letter) until teacher presses Start
-      WORDLEN = 8; buildBoard();
+function updateURL(word) {
+  const url = new URL(location.href);
+  url.searchParams.set('word', word.toUpperCase());
+  history.replaceState({}, '', url);
+}
+
+function handleKey(k) {
+  if (locked) return;
+  if (k === 'Enter') return submitRow();
+  if (k === 'Back') {
+    if (curCol > 0) {
+      curCol--;
+      grid[curRow][curCol] = '';
+      paintGrid();
     }
+    return;
+  }
+  if (/^[a-z]$/i.test(k)) {
+    if (curCol < WORDLEN) {
+      grid[curRow][curCol] = k.toUpperCase();
+      curCol++;
+      paintGrid();
+    }
+  }
+}
+
+function paintGrid() {
+  const rows = [...boardEl.children];
+  rows.forEach((rowEl, r) => {
+    [...rowEl.children].forEach((cell, c) => {
+      const ch = grid[r][c];
+      cell.textContent = ch;
+      cell.classList.toggle('filled', !!ch);
+      cell.classList.remove('ok','pos','miss');
+      if (r < curRow) {
+        const evalRow = evaluateRow(grid[r].join(''));
+        cell.classList.add(evalRow[c]);
+      }
+    })
+  });
+
+  const best = {};
+  for (let r = 0; r < curRow; r++) {
+    const guess = grid[r].join('');
+    const evalRow = evaluateRow(guess);
+    for (let i = 0; i < WORDLEN; i++) {
+      const ch = guess[i];
+      const st = evalRow[i];
+      const rank = {miss:0,pos:1,ok:2};
+      if (!best[ch] || rank[st] > rank[best[ch]]) best[ch] = st;
+    }
+  }
+
+  [...kbEl.querySelectorAll('.key')].forEach(k => {
+    const val = (k.dataset.key || '').toUpperCase();
+    k.classList.remove('ok','pos','miss');
+    if (best[val]) k.classList.add(best[val]);
+  });
+}
+
+function evaluateRow(guess) {
+  guess = guess.toUpperCase();
+  const res = Array(WORDLEN).fill('miss');
+  const secretArr = secret.split('');
+  const used = Array(WORDLEN).fill(false);
+
+  // pass 1: greens
+  for (let i = 0; i < WORDLEN; i++) {
+    if (guess[i] === secret[i]) {
+      res[i] = 'ok';
+      used[i] = true;
+    }
+  }
+
+  // pass 2: yellows
+  for (let i = 0; i < WORDLEN; i++) {
+    if (res[i] === 'ok') continue;
+    const idx = secretArr.findIndex((ch, j) => !used[j] && ch === guess[i]);
+    if (idx !== -1) {
+      res[i] = 'pos';
+      used[idx] = true;
+    }
+  }
+
+  return res;
+}
+
+function submitRow() {
+  if (grid[curRow].some(ch => !ch)) {
+    showToast('Заповніть усі літери');
+    return;
+  }
+  const guess = grid[curRow].join('');
+  const evalRow = evaluateRow(guess);
+
+  [...boardEl.children[curRow].children].forEach((cell, i) => {
+    cell.classList.add(evalRow[i]);
+  });
+
+  if (guess.toUpperCase() === secret) {
+    locked = true;
+    showToast('Вітаю! Слово вгадано 🎉');
+  } else if (curRow === MAX_TRIES-1) {
+    locked = true;
+    showToast(`На жаль. Секрет: ${secret}`, 2500);
+  } else {
+    curRow++;
+    curCol = 0;
+  }
+
+  paintGrid();
+}
+
+// keyboard + physical keys
+buildKB();
+window.addEventListener('keydown', e => {
+  const k = e.key;
+  if (k === 'Enter') return handleKey('Enter');
+  if (k === 'Backspace') return handleKey('Back');
+  if (/^[a-z]$/i.test(k)) handleKey(k);
+});
+
+startBtn.addEventListener('click', () => {
+  const w = (secretInput.value || '').trim();
+  if (!/^[a-zA-Z]{8}$/.test(w)) {
+    showToast('Введіть слово англійською, рівно 8 літер');
+    return;
+  }
+  resetGame(w);
+  secretInput.value = '';
+});
+
+revealBtn.addEventListener('click', () => {
+  secretInput.type = secretInput.type === 'password' ? 'text' : 'password';
+});
+
+// Autostart from URL param ?word=XXXXXXXX
+const urlWord = new URL(location.href).searchParams.get('word');
+if (urlWord && /^[a-zA-Z]{8}$/.test(urlWord)) {
+  resetGame(urlWord);
+} else {
+  WORDLEN = 8;
+  buildBoard();
+}
   </script>
 </body>
 </html>
